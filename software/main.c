@@ -5,12 +5,14 @@
 
 #pragma config FOSC = INTOSC, WDTE = ON, CP = OFF, PLLEN = ON, BOREN = OFF, MCLRE = ON, CLKOUTEN = OFF, PWRTE = OFF, LPBOREN = ON,
 
-#define DIN_PIN_MASK (1 << 5)
-#define DOUT_PIN_MASK (1 << 4)
-#define RED_PIN_MASK   (1 << 0)
-#define GREEN_PIN_MASK (1 << 1)
-#define BLUE_PIN_MASK  (1 << 2)
-#define RGB_PIN_MASK (RED_PIN_MASK | GREEN_PIN_MASK | BLUE_PIN_MASK)
+#define DIN_PIN_MASK (1 << 11)
+#define DOUT_PIN_MASK (1 << 8)
+#define RED_PIN_MASK   (1 << 7)
+#define GREEN_PIN_MASK (1 << 6)
+#define BLUE_PIN_MASK  (1 << 5)
+#define WHITE_PIN_MASK  (1 << 2)
+#define UV_PIN_MASK  (1 << 3)
+#define RGBWUV_PIN_MASK (RED_PIN_MASK | GREEN_PIN_MASK | BLUE_PIN_MASK | WHITE_PIN_MASK | UV_PIN_MASK)
 
 // How long of a silence on the line is considered a latch event.
 // Units are 32[us] per count.
@@ -22,8 +24,8 @@
 static uint8_t temperature;
 static uint8_t max_temp;
 
-static uint8_t r, g, b;
-uint8_t color_array[24];
+static uint8_t r, g, b, w, uv;
+uint8_t color_array[40];
 volatile uint8_t bit_count;
 
 static void InitializePwm() {
@@ -31,26 +33,31 @@ static void InitializePwm() {
   PWM1CLKCON = 0;
   PWM2CLKCON = 0;
   PWM3CLKCON = 0;
+  PWM4CLKCON = 0;
 
   // Set the period to 2^16
   PWM1PRH = PWM1PRL = 0xFF;
   PWM2PRH = PWM2PRL = 0xFF;
   PWM3PRH = PWM3PRL = 0xFF;
+  PWM4PRH = PWM4PRL = 0xFF;
 
   // Set the phase to 0.
   PWM1PHH = PWM1PHL = 0;
   PWM2PHH = PWM2PHL = 0;
   PWM3PHH = PWM3PHL = 0;
+  PWM4PHH = PWM4PHL = 0;
 
   // Set the offset to 0.
   PWM1OFH = PWM1OFL = 0;
   PWM2OFH = PWM2OFL = 0;
   PWM3OFH = PWM3OFL = 0;
+  PWM4OFH = PWM4OFL = 0;
 
   // Set the duty cycle to 0.
   PWM1DC = 0;
   PWM2DC = 0;
   PWM3DC = 0;
+  PWM4DC = 0;
 
   // Latch the values on next trigger.
   PWMLD = 0x07;
@@ -59,6 +66,7 @@ static void InitializePwm() {
   PWM1CON = 0x40;
   PWM2CON = 0x40;
   PWM3CON = 0x40;
+  PWM4CON = 0x40;
 
   // Enable all PWM modules.
   PWMEN = 0x07;
@@ -74,7 +82,7 @@ static void InitializePins() {
   // Schmidt-trigger input on Din.
   INLVLA = DIN_PIN_MASK;
   // Set the output pins as output.
-  TRISA = ~(RGB_PIN_MASK | DOUT_PIN_MASK);
+  TRISA = ~(RGBWUV_PIN_MASK | DOUT_PIN_MASK);
 }
 
 static void InitializeTimers() {
@@ -153,7 +161,7 @@ static void ReadTemperature() {
 }
 
 static void ConvertColor() {
-  r = g = b = 0;
+  r = g = b = w = uv = 0;
 
   // Note the the temperature units used are reversed: bigger number == lower
   // temperature. So the condition below actually means temp <= max_temp.
@@ -174,6 +182,14 @@ static void ConvertColor() {
     // Read Blue bits.
     for (i = 0; i < 8; ++i) {
       b |= ((*p++ >> 5) & 1) << i;
+      
+    // Read White bits.
+    for (i = 0; i < 8; ++i) {
+      w |= ((*p++ >> 5) & 1) << i;
+      
+    // Read UV bits.
+    for (i = 0; i < 8; ++i) {
+      uv |= ((*p++ >> 5) & 1) << i;
     }
   }
 }
@@ -183,6 +199,9 @@ static void LatchColor() {
   PWM1DC = (uint16_t) g * g;
   PWM2DC = (uint16_t) r * r;
   PWM3DC = (uint16_t) b * b;
+  PWM3DC = (uint16_t) w * w;
+  
+  //CODE IS MISSING: COMPARE uv, IF uv IS 255, SET UVOUT TO HIGH
 
   // Latch all at once.
   PWMLD = 0x07;
@@ -235,8 +254,8 @@ void main() {
   }
 
   // Enable interrupts on any edge of DIN.
-  IOCAP5 = 1;
-  IOCAN5 = 1;
+  IOCCP1 = 1;
+  IOCCN1 = 1;
   IOCIE = 1;
 
   // Wait for silence. Do not take interrupts and do not set the output.
@@ -244,7 +263,7 @@ void main() {
   while (TMR0 < LATCH_TIME) {
     if (IOCAF5) {
       TMR0 = 0;
-      IOCAF5 = 0;
+      IOCCF1 = 0;
     }
   }
 
@@ -257,7 +276,7 @@ void main() {
     bit_count = 25;
 
     // Ready to handle interrupts. Clear first.
-    IOCAF5 = 0;
+    IOCCF1 = 0;
     GIE = 1;
 
     // Wait for read to start. The interrupt handler will decrement bit_count.
