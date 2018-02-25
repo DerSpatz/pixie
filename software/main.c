@@ -182,11 +182,13 @@ static void ConvertColor() {
     // Read Blue bits.
     for (i = 0; i < 8; ++i) {
       b |= ((*p++ >> 5) & 1) << i;
+    }
       
     // Read White bits.
     for (i = 0; i < 8; ++i) {
       w |= ((*p++ >> 5) & 1) << i;
-      
+    }
+    
     // Read UV bits.
     for (i = 0; i < 8; ++i) {
       uv |= ((*p++ >> 5) & 1) << i;
